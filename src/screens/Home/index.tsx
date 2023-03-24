@@ -37,8 +37,8 @@ export function Home() {
     <View style={styles.container}>
       <Header
         icon={Trophy}
-        title="Vamos estudar"
-        subtitle="Treine seus conhecimento"
+        title="Vamos estudar!"
+        subtitle="Treine seus conhecimentos"
         onPress={() => navigate('history')}
       />
 

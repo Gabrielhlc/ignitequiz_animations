@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, View, Text } from 'react-native';
+import { Alert, View, Text, BackHandler } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -12,10 +12,10 @@ import Animated, {
   runOnJS
 } from 'react-native-reanimated';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
 
 import { useNavigation, useRoute } from '@react-navigation/native';
-
-
 
 import { QUIZ } from '../../data/quiz';
 import { historyAdd } from '../../storage/quizHistoryStorage';
@@ -26,10 +26,10 @@ import { QuizHeader } from '../../components/QuizHeader';
 import { ConfirmButton } from '../../components/ConfirmButton';
 import { OutlineButton } from '../../components/OutlineButton';
 import { ProgressBar } from '../../components/ProgressBar';
+import { OverlayFeedback } from '../../components/OverlayFeedback';
 
 import { THEME } from '../../styles/theme';
 import { styles } from './styles';
-import { G } from 'react-native-svg';
 
 interface Params {
   id: string;
@@ -46,6 +46,8 @@ export function Quiz() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [quiz, setQuiz] = useState<QuizProps>({} as QuizProps);
   const [alternativeSelected, setAlternativeSelected] = useState<null | number>(null);
+  const [statusReply, setStatusReply] = useState(0);
+
 
   const shake = useSharedValue(0);
   const scrollY = useSharedValue(0);
@@ -56,6 +58,13 @@ export function Quiz() {
   const route = useRoute();
   const { id } = route.params as Params;
 
+  async function playSound(isCorrect: boolean) {
+    const file = isCorrect ? require('../../assets/correct.mp3') : require('../../assets/wrong.mp3');
+    const { sound } = await Audio.Sound.createAsync(file, { shouldPlay: true });
+
+    await sound.setPositionAsync(0);
+    await sound.playAsync();
+  }
 
   function handleSkipConfirm() {
     Alert.alert('Pular', 'Deseja realmente pular a questão?', [
@@ -79,8 +88,16 @@ export function Quiz() {
     });
   }
 
-  function shakeAnimation() {
-    shake.value = withSequence(withTiming(3, { duration: 400, easing: Easing.bounce }), withTiming(0))
+  async function shakeAnimation() {
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    shake.value = withSequence(
+      withTiming(3, { duration: 400, easing: Easing.bounce }),
+      withTiming(0, undefined, (finished) => {
+        'worklet';
+        if (finished) {
+          runOnJS(handleNextQuestion)();
+        }
+      }))
   }
 
   function handleNextQuestion() {
@@ -98,13 +115,18 @@ export function Quiz() {
 
     if (quiz.questions[currentQuestion].correct === alternativeSelected) {
       setPoints(prevState => prevState + 1);
+
+      await playSound(true);
+      setStatusReply(1);
+      handleNextQuestion();
+
     } else {
+      await playSound(false);
+      setStatusReply(2);
       shakeAnimation();
     }
 
     setAlternativeSelected(null);
-
-    handleNextQuestion();
   }
 
   function handleStop() {
@@ -195,12 +217,20 @@ export function Quiz() {
     setIsLoading(false);
   }, []);
 
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', handleStop);
+
+    return () => backHandler.remove();
+  }, [])
+
   if (isLoading) {
     return <Loading />
   }
 
   return (
     <View style={styles.container}>
+      <OverlayFeedback status={statusReply} />
+
       <Animated.View style={fixedProgressBarStyle}>
         <Text style={styles.title}>
           {quiz.title}
@@ -232,6 +262,7 @@ export function Quiz() {
               question={quiz.questions[currentQuestion]}
               alternativeSelected={alternativeSelected}
               setAlternativeSelected={setAlternativeSelected}
+              onUnmount={() => setStatusReply(0)}
             />
           </Animated.View>
         </GestureDetector>
